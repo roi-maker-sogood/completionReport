@@ -102,6 +102,7 @@ let state = {
   defaults: loadJSON(LS_KEYS.defaults, { contractorName: '', contractorAddress: '', preparedByCompany: '', viberName: '', viberNumber: '', email: '', website: '', location: '' }),
   reports: loadJSON(LS_KEYS.reports, []),
   activeSection: 'cover',
+  activeTemplatePage: 0,
   zoom: 0.7,
   activePasteSlot: null,
   templatePages: [],
@@ -144,8 +145,35 @@ function isSectionComplete(id, d) {
 /* ---------------------------------------------------------------------- */
 /* 4. SIDE NAV                                                             */
 /* ---------------------------------------------------------------------- */
+function hasActiveTemplatePages() {
+  return Boolean(state.current.template && state.templatePages.length);
+}
+
+function templatePageTitle(page, index) {
+  return `Page ${page.page || index + 1}`;
+}
+
 function renderSidenav() {
   const list = $('#sectionList');
+  const sectionHeading = $('.sidenav-hint', list.parentElement);
+  if (hasActiveTemplatePages()) {
+    if (sectionHeading) sectionHeading.textContent = 'Template pages';
+    list.innerHTML = state.templatePages.map((page, index) => `
+      <li class="section-item ${state.activeTemplatePage === index ? 'active' : ''}" data-template-page="${index}">
+        <span class="section-dot">${index + 1}</span>
+        <span class="section-name">${esc(templatePageTitle(page, index))}</span>
+      </li>
+    `).join('');
+    $$('[data-template-page]', list).forEach(el => el.addEventListener('click', () => {
+      state.activeTemplatePage = Number(el.dataset.templatePage);
+      renderAll();
+    }));
+    $('#reportLabel').textContent = `${state.current.cover.month || 'Untitled'} ${state.current.cover.year || ''} · ${state.templatePages.length} template pages`.trim();
+    renderReportList();
+    return;
+  }
+
+  if (sectionHeading) sectionHeading.textContent = 'Sections';
   list.innerHTML = SECTIONS.map((s, i) => {
     const done = isSectionComplete(s.id, state.current);
     const active = state.activeSection === s.id;
@@ -230,6 +258,11 @@ function bindValue(path, value) {
 }
 function renderSidenavSoft() {
   // Cheap refresh of dots/label without rebuilding the whole nav (keeps scroll position)
+  if (hasActiveTemplatePages()) {
+    $('#reportLabel').textContent = `${state.current.cover.month || 'Untitled'} ${state.current.cover.year || ''} · ${state.templatePages.length} template pages`.trim();
+    return;
+  }
+
   SECTIONS.forEach(s => {
     const el = $(`.section-item[data-section="${s.id}"]`);
     if (!el) return;
@@ -550,6 +583,11 @@ function parseCSV(text) {
 /* ---------------------------------------------------------------------- */
 function renderEditor() {
   const root = $('#editor');
+  if (hasActiveTemplatePages()) {
+    renderTemplateEditor(root);
+    return;
+  }
+
   const id = state.activeSection;
   const meta = SECTIONS.find(s => s.id === id);
   let body = '';
@@ -658,6 +696,92 @@ function renderEditor() {
   wireImageSlots(root);
   wireTables(root);
   $('#btnApplyDefaultsContact')?.addEventListener('click', () => { applyDefaultsToContact(); renderEditor(); renderPreview(); toast('Applied agency defaults'); });
+}
+
+function templateFieldLabel(element, index) {
+  const fieldLabels = {
+    'cover.month': 'Cover month',
+    'cover.year': 'Cover year',
+    'cover.clientName': 'Prepared for',
+    'cover.preparedByName': 'Prepared by',
+    'cover.preparedByCompany': 'Company',
+    'summary.reportDate': 'Report date',
+    'summary.contractorName': 'Contractor name',
+    'summary.contractorAddress': 'Contractor address',
+    'summary.projectNames': 'Project name',
+    'summary.projectDescription': 'Project description',
+    'summary.startDate': 'Start date',
+    'summary.completionDate': 'Completion date',
+    'summary.closingNote': 'Closing note',
+    'summary.preparerName': 'Preparer name',
+    'summary.approvedClientName': 'Approved client',
+    'summary.approvedPosition': 'Position',
+    'summary.approvedCompany': 'Approved company',
+    'contact.viberName': 'Viber name',
+    'contact.viberNumber': 'Viber number',
+    'contact.email': 'Email',
+    'contact.website': 'Website',
+    'contact.location': 'Location',
+  };
+  if (TEMPLATE_FIELD_PATHS.has(element.dataField)) return fieldLabels[element.dataField];
+  const role = String(element.role || '').replace(/[_-]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase()) || `Text ${index + 1}`;
+  const sample = String(element.text || '').replace(/\s+/g, ' ').trim();
+  return sample ? `${role} · ${sample.slice(0, 48)}${sample.length > 48 ? '…' : ''}` : role;
+}
+
+function applyTemplateTextEdits() {
+  const edits = state.current.template?.textEdits || {};
+  state.templatePages.forEach((page, pageIndex) => {
+    page.elements.forEach(element => {
+      const key = `${pageIndex}:${element.id}`;
+      if (Object.prototype.hasOwnProperty.call(edits, key) && !TEMPLATE_FIELD_PATHS.has(element.dataField)) {
+        element.text = edits[key];
+      }
+    });
+  });
+}
+
+function renderTemplateEditor(root) {
+  const pageIndex = Math.min(state.activeTemplatePage, state.templatePages.length - 1);
+  const page = state.templatePages[pageIndex];
+  const textElements = page.elements
+    .map((element, index) => ({ element, index }))
+    .filter(({ element }) => element.type === 'text');
+
+  root.innerHTML = `
+    <div class="editor-head">
+      <h2>${esc(templatePageTitle(page, pageIndex))}</h2>
+      <p>Edit this page's text here or click text in the live preview. Changes update immediately.</p>
+    </div>
+    ${textElements.length ? textElements.map(({ element, index }) => {
+      const value = TEMPLATE_FIELD_PATHS.has(element.dataField)
+        ? (getPath(state.current, element.dataField) ?? element.text)
+        : element.text;
+      const linked = TEMPLATE_FIELD_PATHS.has(element.dataField);
+      return `<div class="card template-text-card">
+        <label for="templateText${index}">${esc(templateFieldLabel(element, index))}${linked ? `<span class="template-field-link">Report field</span>` : ''}</label>
+        <textarea id="templateText${index}" class="template-text-input" rows="${String(value).includes('\n') ? Math.min(5, String(value).split('\n').length) : 2}" data-template-element="${index}">${esc(value)}</textarea>
+      </div>`;
+    }).join('') : '<div class="card"><p class="muted">No editable text elements were detected on this page.</p></div>'}
+  `;
+
+  $$('.template-text-input', root).forEach(input => {
+    input.addEventListener('input', () => {
+      const element = page.elements[Number(input.dataset.templateElement)];
+      if (!element) return;
+      if (TEMPLATE_FIELD_PATHS.has(element.dataField)) {
+        setPath(state.current, element.dataField, input.value);
+        persistCurrentDebounced();
+        renderSidenavSoft();
+      } else {
+        element.text = input.value;
+        if (!state.current.template.textEdits) state.current.template.textEdits = {};
+        state.current.template.textEdits[`${pageIndex}:${element.id}`] = input.value;
+        persistCurrentDebounced();
+      }
+      renderPreview();
+    });
+  });
 }
 
 /* ---------------------------------------------------------------------- */
@@ -802,25 +926,108 @@ function pageContact(d) {
   </div>`;
 }
 
-function templatePageHTML(background, content) {
-  const size = state.templatePageSize;
-  return `<div class="page template-page" style="width:${size.width}px;height:${size.height}px;background-image:url('${background || ''}')">
-    <div class="template-overlay">${content}</div>
+const TEMPLATE_FIELD_PATHS = new Set([
+  'cover.month', 'cover.year', 'cover.clientName', 'cover.preparedByName', 'cover.preparedByCompany',
+  'summary.reportDate', 'summary.contractorName', 'summary.contractorAddress', 'summary.projectNames',
+  'summary.projectDescription', 'summary.startDate', 'summary.completionDate', 'summary.closingNote',
+  'summary.preparerName', 'summary.approvedClientName', 'summary.approvedPosition', 'summary.approvedCompany',
+  'contact.viberName', 'contact.viberNumber', 'contact.email', 'contact.website', 'contact.location',
+]);
+const TEMPLATE_LABEL_FIELDS = new Map([
+  ['month', 'cover.month'], ['reporting month', 'cover.month'],
+  ['year', 'cover.year'], ['reporting year', 'cover.year'],
+  ['client', 'cover.clientName'], ['client name', 'cover.clientName'], ['prepared for', 'cover.clientName'],
+  ['prepared by', 'cover.preparedByName'], ['prepared by name', 'cover.preparedByName'],
+  ['prepared by company', 'cover.preparedByCompany'],
+  ['report date', 'summary.reportDate'], ['contractor name', 'summary.contractorName'],
+  ['contractor address', 'summary.contractorAddress'], ['project name', 'summary.projectNames'],
+  ['project description', 'summary.projectDescription'], ['start date', 'summary.startDate'],
+  ['completion date', 'summary.completionDate'], ['closing note', 'summary.closingNote'],
+  ['preparer name', 'summary.preparerName'], ['approved client name', 'summary.approvedClientName'],
+  ['position', 'summary.approvedPosition'], ['designation', 'summary.approvedPosition'],
+  ['approved company', 'summary.approvedCompany'], ['viber name', 'contact.viberName'],
+  ['viber number', 'contact.viberNumber'], ['email', 'contact.email'],
+  ['website', 'contact.website'], ['location', 'contact.location'],
+]);
+
+function inferTemplateDataFields(elements) {
+  const textElements = elements.filter(element => element.type === 'text');
+  const labels = textElements.filter(element => {
+    const label = String(element.text || '').trim().toLowerCase().replace(/[:：]+$/, '');
+    return !TEMPLATE_FIELD_PATHS.has(element.dataField) && TEMPLATE_LABEL_FIELDS.has(label);
+  });
+  const mappedFields = new Set(textElements.map(element => element.dataField).filter(field => TEMPLATE_FIELD_PATHS.has(field)));
+
+  labels.forEach(label => {
+    const field = TEMPLATE_LABEL_FIELDS.get(String(label.text || '').trim().toLowerCase().replace(/[:：]+$/, ''));
+    if (mappedFields.has(field)) return;
+
+    const labelX = Number(label.x) || 0;
+    const labelY = Number(label.y) || 0;
+    const labelWidth = Math.max(1, Number(label.width) || 1);
+    const labelHeight = Math.max(1, Number(label.height) || 1);
+    const fontSize = Math.max(8, Number(label.fontSize) || 16);
+    const candidates = textElements.filter(element => {
+      if (element === label || TEMPLATE_FIELD_PATHS.has(element.dataField)) return false;
+      const candidateText = String(element.text || '').trim().toLowerCase().replace(/[:：]+$/, '');
+      return candidateText && !TEMPLATE_LABEL_FIELDS.has(candidateText);
+    }).map(element => {
+      const x = Number(element.x) || 0;
+      const y = Number(element.y) || 0;
+      const height = Math.max(1, Number(element.height) || 1);
+      const sameLine = x >= labelX + labelWidth - 4 && Math.abs(y - labelY) <= Math.max(labelHeight, height);
+      const nextLine = y >= labelY + labelHeight - 4
+        && y - labelY <= Math.max(40, fontSize * 3)
+        && Math.abs(x - labelX) <= labelWidth + fontSize * 4;
+      if (!sameLine && !nextLine) return null;
+      const distance = sameLine
+        ? x - labelX - labelWidth + Math.abs(y - labelY) * 2
+        : y - labelY - labelHeight + Math.abs(x - labelX) * 2;
+      return { element, distance: Math.max(0, distance) };
+    }).filter(Boolean).sort((a, b) => a.distance - b.distance);
+
+    if (!candidates.length || (candidates[1] && candidates[1].distance - candidates[0].distance < fontSize)) return;
+    candidates[0].element.dataField = field;
+    mappedFields.add(field);
+  });
+
+  return elements;
+}
+
+function templateElementHTML(element, data, pageIndex, elementIndex) {
+  if (element.type !== 'text') return '';
+  const x = Number(element.x) || 0;
+  const y = Number(element.y) || 0;
+  const width = Math.max(1, Number(element.width) || 1);
+  const height = Math.max(1, Number(element.height) || 1);
+  const rotation = Number(element.rotation) || 0;
+  const transform = rotation ? ` transform="rotate(${rotation} ${x + width / 2} ${y + height / 2})"` : '';
+
+  const field = TEMPLATE_FIELD_PATHS.has(element.dataField) ? element.dataField : '';
+  const value = field ? getPath(data, field) : '';
+  const text = value == null || value === '' ? element.text : value;
+  const fontSize = Number(element.fontSize) || 16;
+  const anchors = { left: 'start', center: 'middle', right: 'end' };
+  const anchor = anchors[element.alignment] || 'start';
+  const textX = anchor === 'middle' ? x + width / 2 : anchor === 'end' ? x + width : x;
+  const lines = String(text).split(/\r?\n/).map((line, index) =>
+    `<tspan x="${textX}" dy="${index ? fontSize * 1.2 : 0}">${esc(line)}</tspan>`
+  ).join('');
+  return `<text class="template-preview-text" data-template-text="${pageIndex}:${elementIndex}" x="${textX}" y="${y + fontSize}" fill="${esc(element.color || '#111111')}" font-size="${fontSize}" font-family="${esc(element.fontFamily || 'Arial')}" font-weight="${esc(element.fontWeight || 'normal')}" font-style="${esc(element.fontStyle || 'normal')}" text-anchor="${anchor}"${transform}>${lines}</text>`;
+}
+
+function templatePageHTML(page, data, pageIndex) {
+  const pageWidth = Math.max(1, Number(page.width) || state.templatePageSize.width);
+  const pageHeight = Math.max(1, Number(page.height) || state.templatePageSize.height);
+  const size = pageWidth >= pageHeight ? { width: 1123, height: 794 } : { width: 794, height: 1123 };
+  const elements = Array.isArray(page.elements) ? page.elements : [];
+  return `<div class="page template-page" style="width:${size.width}px;height:${size.height}px;background-image:url('${esc(page.background || '')}')">
+    <svg class="template-elements" xmlns="http://www.w3.org/2000/svg" width="${size.width}" height="${size.height}" viewBox="0 0 ${pageWidth} ${pageHeight}" preserveAspectRatio="none">${elements.map((element, index) => templateElementHTML(element, data, pageIndex, index)).join('')}</svg>
   </div>`;
 }
 
 function templatePagesHTML(d) {
-  const s = d.summary;
-  const c = d.contact;
-  const pages = state.templatePages || [];
-  return [
-    templatePageHTML(pages[0], `<h1>Completion Report</h1><h2>${esc(d.cover.month || '[Month]')} ${esc(d.cover.year || '')}</h2><p>Prepared for: <b>${esc(d.cover.clientName || '—')}</b></p><p>Prepared by: <b>${esc(d.cover.preparedByName || '—')}</b></p>`),
-    templatePageHTML(pages[1], `<h2>Project Completion Report</h2><p><b>${esc(s.contractorName || '—')}</b><br>${esc(s.contractorAddress || '')}</p><h3>${esc(s.projectNames || 'Project name')}</h3><p>${esc(s.projectDescription || 'Project description')}</p><p>Start: ${esc(s.startDate || '—')} &nbsp; Completion: ${esc(s.completionDate || '—')}</p>`),
-    templatePageHTML(pages[2], `<h2>Content Calendar</h2>${imageSlotPreview(d.calendarImages, 'Add content calendar images in the form')}`),
-    templatePageHTML(pages[3], `<h2>Posts / Content</h2>${imageSlotPreview(d.contentImages, 'Add content images in the form')}${imageSlotPreview(d.postsImages, 'Add posted-content images in the form')}<p>${d.postsTable.length} post records</p>`),
-    templatePageHTML(pages[4], `<h2>Creatives / Layouts</h2>${imageSlotPreview(d.creativesImages, 'Add creative images in the form')}`),
-    templatePageHTML(pages[5], `<h2>Contact Us</h2><p>${esc(c.viberName || '—')}<br>${esc(c.viberNumber || '—')}</p><p>${esc(c.email || '—')}<br>${esc(c.website || '—')}<br>${esc(c.location || '—')}</p>`),
-  ].join('\n');
+  return state.templatePages.map((page, index) => templatePageHTML(page, d, index)).join('\n');
 }
 
 function pagesHTML(d) {
@@ -845,49 +1052,19 @@ function renderPreview() {
     page.parentNode.insertBefore(frame, page);
     frame.appendChild(page);
   });
-  
-  applyZoom();
-}
 
-async function removePdfTextFromCanvas(page, viewport, canvas) {
-  const textContent = await page.getTextContent();
-  const textBoxes = [];
-
-  for (const item of textContent.items) {
-    if (!item.str || !item.str.trim()) continue;
-    const start = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-    const end = viewport.convertToViewportPoint(item.transform[4] + item.width, item.transform[5]);
-    const textHeight = Math.max(4, Math.abs(item.transform[3] * viewport.scale));
-    textBoxes.push({
-      left: Math.max(0, Math.floor(Math.min(start[0], end[0]) - 2)),
-      right: Math.min(canvas.width - 1, Math.ceil(Math.max(start[0], end[0]) + 2)),
-      top: Math.max(0, Math.floor(Math.min(start[1], end[1]) - textHeight * 0.25 - 2)),
-      bottom: Math.min(canvas.height - 1, Math.ceil(Math.max(start[1], end[1]) + textHeight * 0.45 + 2)),
+  $$('.template-preview-text', wrap).forEach(text => {
+    text.addEventListener('click', () => {
+      const [pageIndex, elementIndex] = text.dataset.templateText.split(':').map(Number);
+      state.activeTemplatePage = pageIndex;
+      renderEditor();
+      const input = $(`.template-text-input[data-template-element="${elementIndex}"]`, $('#editor'));
+      input?.scrollIntoView({ block: 'center' });
+      input?.focus();
     });
-  }
+  });
 
-  if (!textBoxes.length) return;
-  const context = canvas.getContext('2d');
-  const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  const pixels = image.data;
-
-  for (const box of textBoxes) {
-    for (let y = box.top; y <= box.bottom; y++) {
-      const leftX = Math.max(0, box.left - 3);
-      const rightX = Math.min(canvas.width - 1, box.right + 3);
-      const leftIndex = (y * canvas.width + leftX) * 4;
-      const rightIndex = (y * canvas.width + rightX) * 4;
-      for (let x = box.left; x <= box.right; x++) {
-        const ratio = box.right === box.left ? 0 : (x - box.left) / (box.right - box.left);
-        const index = (y * canvas.width + x) * 4;
-        pixels[index] = pixels[leftIndex] * (1 - ratio) + pixels[rightIndex] * ratio;
-        pixels[index + 1] = pixels[leftIndex + 1] * (1 - ratio) + pixels[rightIndex + 1] * ratio;
-        pixels[index + 2] = pixels[leftIndex + 2] * (1 - ratio) + pixels[rightIndex + 2] * ratio;
-        pixels[index + 3] = 255;
-      }
-    }
-  }
-  context.putImageData(image, 0, 0);
+  applyZoom();
 }
 
 async function renderPdfTemplate(filePath) {
@@ -907,17 +1084,48 @@ async function renderPdfTemplate(filePath) {
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    await removePdfTextFromCanvas(page, viewport, canvas);
-    pages.push(canvas.toDataURL('image/jpeg', 0.9));
+    await page.render({
+      canvasContext: canvas.getContext('2d'),
+      viewport,
+    }).promise;
+    pages.push({
+      background: canvas.toDataURL('image/jpeg', 0.9),
+      width: baseViewport.width,
+      height: baseViewport.height,
+      elements: [],
+    });
   }
   state.templatePages = pages;
 }
 
+async function loadTemplatePreview(template) {
+  if (Array.isArray(template.cleaned_pages) && template.cleaned_pages.length) {
+    state.templatePages = template.cleaned_pages.map(page => ({
+      background: page.file_path,
+      width: Number(page.width) || state.templatePageSize.width,
+      height: Number(page.height) || state.templatePageSize.height,
+      elements: inferTemplateDataFields(Array.isArray(page.elements) ? page.elements : []),
+    }));
+    const firstPage = template.cleaned_pages[0];
+    state.templatePageSize = Number(firstPage.width) >= Number(firstPage.height)
+      ? { width: 1123, height: 794 }
+      : { width: 794, height: 1123 };
+    return;
+  }
+  await renderPdfTemplate(template.file_path);
+}
+
 async function selectPdfTemplate(template) {
   try {
-    await renderPdfTemplate(template.file_path);
-    state.current.template = { name: template.template_name, filePath: template.file_path };
+    await loadTemplatePreview(template);
+    state.current.template = {
+      name: template.template_name,
+      filePath: template.file_path,
+      cleanedPages: template.cleaned_pages || [],
+      textEdits: {},
+    };
+    state.activeTemplatePage = 0;
+    applyTemplateTextEdits();
     persistCurrent();
     closeTemplateModal();
     renderAll();
@@ -932,8 +1140,15 @@ function applyZoom() {
   $('#zoomLevel').textContent = Math.round(state.zoom * 100) + '%';
   const pageSize = state.current.template ? state.templatePageSize : { width: 794, height: 1123 };
   
-  $$('.preview-page-frame').forEach(frame => {     frame.style.width = (pageSize.width * state.zoom) + 'px';     frame.style.height = (pageSize.height * state.zoom) + 'px';     frame.style.overflow = 'hidden';   });$$
-('#previewPages .page').forEach(page => {
+  $$('.preview-page-frame').forEach(frame => {
+    const page = $('.page', frame);
+    const width = page ? Number.parseFloat(page.style.width) || pageSize.width : pageSize.width;
+    const height = page ? Number.parseFloat(page.style.height) || pageSize.height : pageSize.height;
+    frame.style.width = (width * state.zoom) + 'px';
+    frame.style.height = (height * state.zoom) + 'px';
+    frame.style.overflow = 'hidden';
+  });
+  $$('#previewPages .page').forEach(page => {
     page.style.transform = `scale(${state.zoom})`;
     page.style.transformOrigin = 'top left';
   });
@@ -1070,7 +1285,22 @@ async function init() {
 
   if (state.current.template?.filePath) {
     try {
-      await renderPdfTemplate(state.current.template.filePath);
+      const savedTemplate = state.current.template;
+      const response = await fetch('get-templates.php');
+      const result = await response.json();
+      const template = response.ok && result.status === 'success' && Array.isArray(result.data)
+        ? result.data.find(item => item.file_path === savedTemplate.filePath)
+        : null;
+      await loadTemplatePreview(template || {
+        cleaned_pages: savedTemplate.cleanedPages,
+        file_path: savedTemplate.filePath,
+      });
+      if (template) {
+        state.current.template = { ...savedTemplate, cleanedPages: template.cleaned_pages || [] };
+      }
+      applyTemplateTextEdits();
+      state.activeTemplatePage = 0;
+      persistCurrent();
     } catch (error) {
       console.warn('Saved PDF template could not be restored:', error);
       state.current.template = null;
@@ -1085,6 +1315,23 @@ async function init() {
   
   wireChrome();
   renderAll();
+
+  const uploadedTemplateId = new URLSearchParams(window.location.search).get('template_id');
+  if (uploadedTemplateId) {
+    try {
+      const response = await fetch('get-templates.php');
+      const result = await response.json();
+      const uploadedTemplate = result.data?.find(template => String(template.id) === uploadedTemplateId);
+      if (!response.ok || result.status !== 'success' || !uploadedTemplate) {
+        throw new Error(result.message || 'The uploaded template could not be found.');
+      }
+      await selectPdfTemplate(uploadedTemplate);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch (error) {
+      console.error('Could not load the uploaded template:', error);
+      toast('Template was saved, but could not be loaded into the preview');
+    }
+  }
 }
 
 // Fallback helper in case the local server is offline
@@ -1100,10 +1347,41 @@ function openReport(id) {
   const r = state.reports.find(x => x.id === id);
   if (!r) return;
   state.current = JSON.parse(JSON.stringify(r));
+  const reportId = state.current.id;
   state.activeSection = 'cover';
-  persistCurrent();
-  renderAll();
-  toast('Report opened');
+  state.templatePages = [];
+  state.activeTemplatePage = 0;
+  const restoreTemplate = state.current.template?.filePath
+    ? fetch('get-templates.php')
+      .then(response => response.json())
+      .then(result => {
+        if (state.current.id !== reportId) return null;
+        const template = result.status === 'success' && Array.isArray(result.data)
+          ? result.data.find(item => item.file_path === state.current.template.filePath)
+          : null;
+        return template ? loadTemplatePreview(template) : loadTemplatePreview({
+          cleaned_pages: state.current.template.cleanedPages,
+          file_path: state.current.template.filePath,
+        });
+      })
+      .then(() => {
+        if (state.current.id === reportId) applyTemplateTextEdits();
+      })
+    : Promise.resolve();
+
+  restoreTemplate.then(() => {
+    if (state.current.id !== reportId) return;
+    persistCurrent();
+    renderAll();
+    toast('Report opened');
+  }).catch(error => {
+    if (state.current.id !== reportId) return;
+    console.error('Could not restore the report template:', error);
+    state.current.template = null;
+    persistCurrent();
+    renderAll();
+    toast('Report opened, but its template could not be loaded');
+  });
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1176,6 +1454,8 @@ function wireChrome() {
   $('#btnDuplicate').addEventListener('click', duplicateLast);
   $('#btnSaveDraft').addEventListener('click', saveDraft);
   $('#btnDefaultTemplate')?.addEventListener('click', useDefaultTemplate);
+  $('#showUploadedTemplates').addEventListener('click', () => showTemplatePanel('list'));
+  $('#showTemplateUpload').addEventListener('click', () => showTemplatePanel('upload'));
   $('#btnLoad').addEventListener('click', () => { renderReportListModal(); openModal('#loadModal'); });
   $('#closeLoad').addEventListener('click', () => closeModal('#loadModal'));
   $('#cancelLoad').addEventListener('click', () => closeModal('#loadModal'));
@@ -1225,6 +1505,8 @@ function renderAll() {
 function useDefaultTemplate() {
   state.current.template = null;
   state.templatePages = [];
+  state.activeTemplatePage = 0;
+  state.activeSection = 'cover';
   state.templatePageSize = { width: 794, height: 1123 };
   persistCurrent();
   renderAll();
@@ -1233,38 +1515,90 @@ function useDefaultTemplate() {
 
 // --- Template Upload Modal Controls ---
 async function loadCustomTemplates() {
+  const ul = document.getElementById('templateListUl');
+  if (!ul) return;
+
   try {
     const res = await fetch('get-templates.php');
     const result = await res.json();
-    const ul = document.getElementById('templateListUl');
-    if (!ul) return;
-    
+    if (!res.ok || result.status !== 'success' || !Array.isArray(result.data)) {
+      throw new Error(result.message || 'Could not load uploaded templates.');
+    }
+
     ul.innerHTML = '';
-    if (result.status === 'success' && result.data && result.data.length > 0) {
+    if (result.data.length > 0) {
       result.data.forEach(tmpl => {
         const li = document.createElement('li');
-        li.style.padding = "6px 0";
-        li.style.display = "flex";
-        li.style.justifyContent = "space-between";
-        li.style.alignItems = "center";
         const isPdf = /\.pdf$/i.test(tmpl.file_path || '');
-        li.innerHTML = `<span>${esc(tmpl.template_name)}</span><span>${isPdf ? `<button type="button" class="btn btn-xs btn-primary" data-template-id="${tmpl.id}">Use as template</button> ` : ''}<a href="${esc(tmpl.file_path)}" target="_blank" rel="noopener" class="btn btn-xs btn-ghost">View</a></span>`;
+        li.className = 'uploaded-template-row';
+        li.innerHTML = `<span class="uploaded-template-name">${esc(tmpl.template_name)}</span><span class="uploaded-template-actions">${isPdf ? `<button type="button" class="btn btn-xs btn-primary" data-template-id="${esc(tmpl.id)}">Use</button> ` : ''}<a href="${esc(tmpl.file_path)}" target="_blank" rel="noopener" class="btn btn-xs btn-ghost">View</a><button type="button" class="btn btn-xs btn-danger" data-template-delete="${esc(tmpl.id)}">Delete</button></span>`;
         ul.appendChild(li);
         if (isPdf) li.querySelector('[data-template-id]').addEventListener('click', () => selectPdfTemplate(tmpl));
+        li.querySelector('[data-template-delete]').addEventListener('click', () => deleteCustomTemplate(tmpl));
       });
     } else {
-      ul.innerHTML = '<li class="muted small" style="padding: 6px 0;">No custom templates uploaded yet.</li>';
+      ul.innerHTML = '<li class="muted small">No uploaded templates yet.</li>';
     }
   } catch (err) {
     console.error('Failed to load templates:', err);
+    ul.innerHTML = `<li class="template-list-error">${esc(err.message || 'Could not load uploaded templates.')}</li>`;
+  }
+}
+
+function showTemplatePanel(panel) {
+  const showList = panel === 'list';
+  $('#uploadedTemplatesPanel').hidden = !showList;
+  $('#templateUploadPanel').hidden = showList;
+  $('#showUploadedTemplates').classList.toggle('active', showList);
+  $('#showUploadedTemplates').setAttribute('aria-selected', String(showList));
+  $('#showTemplateUpload').classList.toggle('active', !showList);
+  $('#showTemplateUpload').setAttribute('aria-selected', String(!showList));
+}
+
+async function deleteCustomTemplate(template) {
+  if (!confirm(`Delete the uploaded template "${template.template_name}"? This cannot be undone.`)) return;
+
+  try {
+    const response = await fetch('delete-template.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: template.id }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.deleted) {
+      throw new Error(result.error || 'Could not delete the uploaded template.');
+    }
+
+    if (state.current.template?.filePath === template.file_path) {
+      state.current.template = null;
+      state.templatePages = [];
+      state.activeTemplatePage = 0;
+      state.activeSection = 'cover';
+      state.templatePageSize = { width: 794, height: 1123 };
+      persistCurrent();
+      const savedReport = state.reports.find(report => report.id === state.current.id);
+      if (savedReport) {
+        savedReport.template = null;
+        savedReport.updatedAt = state.current.updatedAt;
+        saveJSON(LS_KEYS.reports, state.reports);
+      }
+      renderAll();
+    }
+
+    await loadCustomTemplates();
+    toast('Uploaded template deleted');
+  } catch (error) {
+    console.error('Template deletion failed:', error);
+    toast(error.message || 'Could not delete the uploaded template');
   }
 }
 
 function openTemplateModal() {
   const modal = document.getElementById('templateModal');
   if (modal) {
+    showTemplatePanel('list');
     modal.classList.add('open');
-    loadCustomTemplates(); // <--- Loads the list instantly when opened
+    loadCustomTemplates();
   }
 }
 
@@ -1275,29 +1609,12 @@ function closeTemplateModal() {
   if (form) form.reset();
 }
 
-// --- Submit Template to PHP Backend via Fetch ---
-async function handleTemplateUpload(e) {
-  e.preventDefault();
-  const form = document.getElementById('templateUploadForm');
-  const formData = new FormData(form);
-
-  try {
-    const response = await fetch('upload-template.php', {
-      method: 'POST',
-      body: formData
-    });
-    
-    const result = await response.json();
-    
-    if (result.status === 'success') {
-      alert('Template uploaded successfully!');
-      closeTemplateModal();
-    } else {
-      alert('Upload failed: ' + (result.message || 'Unknown error'));
-    }
-  } catch (err) {
-    console.error('Error uploading template:', err);
-    alert('Failed to connect to the server. Make sure XAMPP Apache is running.');
+function handleTemplateUpload(e) {
+  const form = e.currentTarget;
+  const submitButton = form.querySelector('[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = 'Analyzing template...';
   }
 }
 

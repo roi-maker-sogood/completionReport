@@ -26,7 +26,7 @@ $userEmail = $_SESSION["user_email"];
 
     <title>Digital — Completion Report Builder</title>
 
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=<?php echo filemtime(__DIR__ . '/styles.css'); ?>">
 
 </head>
 
@@ -522,9 +522,7 @@ $userEmail = $_SESSION["user_email"];
 
         <div class="modal-head">
 
-            <h2>
-                Upload Custom Template
-            </h2>
+            <h2>Custom templates</h2>
 
 
             <button
@@ -537,110 +535,42 @@ $userEmail = $_SESSION["user_email"];
         </div>
 
 
-        <p
-            class="muted small"
-            style="margin-bottom: 14px;"
-        >
-            Upload a PDF report design. Users can select it as a template
-            and fill the report using the normal form fields.
-        </p>
-
-
-        <form
-            id="templateUploadForm"
-            onsubmit="handleTemplateUpload(event)"
-        >
-
-            <div
-                class="form-grid single"
-                style="gap: 12px;"
-            >
-
-
-                <label>
-                    Template Name
-
-                    <input
-                        type="text"
-                        name="template_name"
-                        id="templateNameInput"
-                        placeholder="e.g., Q3 Special Format"
-                        required
-                    >
-
-                </label>
-
-
-                <label>
-                    Select PDF Template
-
-                    <input
-                        type="file"
-                        name="template_file"
-                        id="templateFileInput"
-                        accept=".pdf"
-                        required
-                        style="
-                            padding: 6px;
-                            border: 1px solid var(--line);
-                            border-radius: var(--radius-sm);
-                            background: #fff;
-                        "
-                    >
-
-                </label>
-
-            </div>
-
-
-            <div class="modal-actions">
-
-                <button
-                    type="button"
-                    class="btn btn-ghost"
-                    onclick="closeTemplateModal()"
-                >
-                    Cancel
-                </button>
-
-
-                <button
-                    type="submit"
-                    class="btn btn-primary"
-                >
-                    Upload Template
-                </button>
-
-            </div>
-
-        </form>
-
-
-        <div
-            id="uploadedTemplatesList"
-            style="
-                margin-top: 15px;
-                border-top: 1px solid var(--line);
-                padding-top: 10px;
-            "
-        >
-
-            <h4>
-                Uploaded Templates
-            </h4>
-
-
-            <ul
-                id="templateListUl"
-                style="
-                    list-style: none;
-                    padding: 0;
-                    max-height: 150px;
-                    overflow-y: auto;
-                "
-            ></ul>
-
+        <div class="template-tabs" role="tablist" aria-label="Custom template actions">
+            <button type="button" class="btn btn-ghost active" id="showUploadedTemplates" role="tab" aria-selected="true">Uploaded templates</button>
+            <button type="button" class="btn btn-ghost" id="showTemplateUpload" role="tab" aria-selected="false">Upload template</button>
         </div>
+
+        <section id="uploadedTemplatesPanel" role="tabpanel" aria-labelledby="showUploadedTemplates">
+            <p class="muted small template-panel-description">Choose a saved template for the live preview, or delete one you no longer need.</p>
+            <ul id="templateListUl" class="uploaded-template-list"></ul>
+        </section>
+
+        <section id="templateUploadPanel" role="tabpanel" aria-labelledby="showTemplateUpload" hidden>
+            <p class="muted small template-panel-description">
+                Upload a PDF to analyze and clean it with TemplateCopier before using it in the live preview. The PDF is sent to Gemini for layout analysis; don't upload confidential files unless approved.
+            </p>
+            <form
+                id="templateUploadForm"
+                onsubmit="handleTemplateUpload(event)"
+                action="../TemplateCopier/analyze.php"
+                method="POST"
+                enctype="multipart/form-data"
+            >
+                <input type="hidden" name="dashboard_upload" value="1">
+                <div class="form-grid single" style="gap: 12px;">
+                    <label>Template Name
+                        <input type="text" name="template_name" id="templateNameInput" placeholder="e.g., Q3 Special Format" required>
+                    </label>
+                    <label>Select PDF Template
+                        <input type="file" name="template" id="templateFileInput" accept=".pdf" required style="padding: 6px;border: 1px solid var(--line);border-radius: var(--radius-sm);background: #fff;">
+                    </label>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost" onclick="closeTemplateModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Upload Template</button>
+                </div>
+            </form>
+        </section>
 
     </div>
 
@@ -666,7 +596,7 @@ $userEmail = $_SESSION["user_email"];
     window.pdfjsLib = pdfjsLib;
 </script>
 
-<script src="app.js?v=20260921-4"></script>
+<script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 
 
 </body>

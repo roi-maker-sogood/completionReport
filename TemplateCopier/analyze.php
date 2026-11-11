@@ -1,5 +1,6 @@
 <?php
 
+session_start();
 require_once __DIR__ . '/vendor/autoload.php';
 use Smalot\PdfParser\Parser;
 
@@ -24,7 +25,7 @@ function failRequest($message, $status = 400)
             h1{margin-top:0;font-size:24px}a{color:#087f68}
         </style>
     </head>
-    <body><main><h1>Template analysis failed</h1><p><?= escapeHtml($message) ?></p><a href="index.php">Return to upload</a></main></body>
+    <body><main><h1>Template analysis failed</h1><p><?= escapeHtml($message) ?></p><a href="<?= isset($_POST['dashboard_upload']) ? '../Dashboard/index.php' : 'index.php' ?>">Return to upload</a></main></body>
     </html>
     <?php
     exit;
@@ -42,7 +43,7 @@ function outputTextFromGeminiResponse(array $response)
     return implode("\n", $textParts);
 }
 
-function requestVisionAnalysis($pdfPath, $extractedText, $apiKey, &$model, $fallbackModel = '')
+function requestVisionAnalysis($pdfPath, $extractedText, $apiKey, &$model, $fallbackModel, $deadline)
 {
     if (!function_exists('curl_init')) {
         throw new RuntimeException('PHP cURL is required. Enable the curl extension in XAMPP php.ini and restart Apache.');
@@ -58,12 +59,13 @@ function requestVisionAnalysis($pdfPath, $extractedText, $apiKey, &$model, $fall
 Analyze the attached PDF visually and rebuild each page as editable design elements. Use the accompanying extracted PDF text only to help transcribe exact wording; the PDF page visuals are authoritative for layout and styling.
 
 Return one JSON object with this shape:
-{"pages":[{"page":1,"width":612,"height":792,"elements":[{"type":"text","role":"title","text":"Example","x":40,"y":40,"width":500,"height":50,"fontSize":32,"fontFamily":"Arial","fontWeight":"bold","color":"#111111","alignment":"left"}]}]}
+{"pages":[{"page":1,"width":612,"height":792,"elements":[{"type":"text","role":"field_label","text":"Month","x":40,"y":40,"width":48,"height":20,"fontSize":14,"color":"#111111"},{"type":"text","role":"field_value","dataField":"cover.month","text":"June","x":92,"y":40,"width":100,"height":20,"fontSize":14,"color":"#111111"}]}]}
 
 Requirements:
 - Include every PDF page, in page order. Coordinates are points/pixels from the page's top-left corner; x/y describe the top-left of each element.
 - Identify visible text, rectangles, ellipses, lines, images, and meaningful page backgrounds. Use type text, rectangle, ellipse, line, or image. For image elements use description for a short description.
 - For each element provide a concise role and approximate x, y, width, and height. For text include exact readable text, fontSize, fontFamily when recognizable, fontWeight, color, and alignment. For shapes include fill, stroke, and strokeWidth when visible.
+- For text elements that contain replaceable report values, set dataField to exactly one matching field path from this list: cover.month, cover.year, cover.clientName, cover.preparedByName, cover.preparedByCompany, summary.reportDate, summary.contractorName, summary.contractorAddress, summary.projectNames, summary.projectDescription, summary.startDate, summary.completionDate, summary.closingNote, summary.preparerName, summary.approvedClientName, summary.approvedPosition, summary.approvedCompany, contact.viberName, contact.viberNumber, contact.email, contact.website, contact.location. Leave dataField out for static labels, headings, and other text. Map the value text next to a label (for example the month name after "Month"), not the label itself. Use nearby labels and visual context to identify the correct field. Do not assign the same field to a static label.
 - Use numeric page and geometry values. Use hex colors. Do not invent content that is not visible. Do not wrap the JSON in Markdown.
 - Keep the element list faithful to the visual page; do not include invisible PDF internals.
 
@@ -90,21 +92,33 @@ PROMPT;
     ];
 
     $retryableStatuses = [429, 500, 502, 503, 504];
-    $maxAttempts = 3;
+    $maxAttempts = 2;
     $responseBody = false;
     $status = 0;
+    $attemptedModels = [];
     $models = [$model];
     if ($fallbackModel !== '' && $fallbackModel !== $model) {
         $models[] = $fallbackModel;
     }
 
     foreach ($models as $modelIndex => $candidateModel) {
+        if (microtime(true) >= $deadline) {
+            break;
+        }
+
         $model = $candidateModel;
+        $attemptedModels[] = $candidateModel;
         $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/'
             . rawurlencode($candidateModel)
             . ':generateContent';
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $remainingSeconds = $deadline - microtime(true);
+            if ($remainingSeconds <= 1) {
+                break;
+            }
+            $requestTimeout = min(90, (int) floor($remainingSeconds - 1));
+
             $curl = curl_init($endpoint);
             curl_setopt_array($curl, [
                 CURLOPT_POST => true,
@@ -114,8 +128,8 @@ PROMPT;
                     'Content-Type: application/json',
                 ],
                 CURLOPT_POSTFIELDS => json_encode($requestBody),
-                CURLOPT_CONNECTTIMEOUT => 20,
-                CURLOPT_TIMEOUT => 240,
+                CURLOPT_CONNECTTIMEOUT => min(15, $requestTimeout),
+                CURLOPT_TIMEOUT => $requestTimeout,
             ]);
 
             $responseBody = curl_exec($curl);
@@ -127,25 +141,51 @@ PROMPT;
                 throw new RuntimeException('Could not reach the vision API: ' . $curlError);
             }
 
+            if ($status >= 200 && $status < 300) {
+                break;
+            }
+
             if (!in_array($status, $retryableStatuses, true) || $attempt === $maxAttempts) {
                 break;
             }
 
-            sleep($attempt);
+            $retryDelay = min(2 ** $attempt, (int) floor($deadline - microtime(true) - 2));
+            if ($retryDelay <= 0) {
+                break;
+            }
+            sleep($retryDelay);
         }
 
         if ($status >= 200 && $status < 300) {
             break;
         }
-        if ($status !== 503 || $modelIndex === count($models) - 1) {
+        if (!in_array($status, $retryableStatuses, true) || $modelIndex === count($models) - 1) {
             break;
         }
     }
 
     $response = json_decode($responseBody, true);
     if ($status < 200 || $status >= 300) {
+        if (microtime(true) >= $deadline) {
+            throw new RuntimeException('Template analysis reached its 270-second time limit. Try a smaller PDF or retry when Gemini is less busy.');
+        }
         if (in_array($status, $retryableStatuses, true)) {
-            throw new RuntimeException('Gemini is temporarily unavailable after retrying its available models (' . $status . '). Please try again later.');
+            $apiMessage = is_array($response)
+                ? (string) ($response['error']['message'] ?? '')
+                : '';
+            error_log(sprintf(
+                'Gemini vision analysis failed: HTTP %d; models tried: %s; response: %s',
+                $status,
+                implode(', ', $attemptedModels),
+                substr((string) $responseBody, 0, 2000)
+            ));
+            $detail = $apiMessage !== '' ? ' Gemini: ' . $apiMessage : '';
+            throw new RuntimeException(
+                'Gemini is temporarily unavailable after retrying models '
+                . implode(' and ', $attemptedModels)
+                . ' (HTTP ' . $status . '). Please retry later or check Google AI Studio service status.'
+                . $detail
+            );
         }
 
         $apiMessage = is_array($response)
@@ -205,6 +245,7 @@ function normalizePages(array $analysis)
                 'id' => 'element_' . ($pageIndex + 1) . '_' . ($elementIndex + 1),
                 'type' => $type,
                 'role' => (string) ($rawElement['role'] ?? ''),
+                'dataField' => (string) ($rawElement['dataField'] ?? ''),
                 'text' => $text,
                 'description' => (string) ($rawElement['description'] ?? ''),
                 'x' => (float) ($rawElement['x'] ?? 0),
@@ -262,6 +303,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     failRequest('Upload a PDF from the template screen.');
 }
 
+$dashboardUpload = isset($_POST['dashboard_upload']) && $_POST['dashboard_upload'] === '1';
+if ($dashboardUpload && !isset($_SESSION['user_id'])) {
+    failRequest('Sign in to upload a template from the Dashboard.', 401);
+}
+
 if (!isset($_FILES['template']) || $_FILES['template']['error'] !== UPLOAD_ERR_OK) {
     failRequest('The PDF upload failed. Check the file size and try again.');
 }
@@ -301,10 +347,11 @@ if (!move_uploaded_file($file['tmp_name'], $savedFile)) {
 }
 
 try {
+    $analysisDeadline = microtime(true) + 270;
     $pdf = (new Parser())->parseFile($savedFile);
     $pdfDetails = $pdf->getDetails();
     $pdfText = $pdf->getText();
-    $analysis = requestVisionAnalysis($savedFile, $pdfText, $apiKey, $model, $fallbackModel);
+    $analysis = requestVisionAnalysis($savedFile, $pdfText, $apiKey, $model, $fallbackModel, $analysisDeadline);
     $pages = normalizePages($analysis);
 } catch (Throwable $exception) {
     failRequest($exception->getMessage(), 502);
@@ -313,9 +360,12 @@ try {
 $blueprint = [
     'version' => '2.0',
     'created_at' => date(DATE_ATOM),
+    'dashboard_upload' => $dashboardUpload,
+    'dashboard_owner_id' => $dashboardUpload ? (int) $_SESSION['user_id'] : null,
     'source' => [
         'original_name' => basename($file['name']),
         'saved_file' => basename($savedFile),
+        'template_name' => trim((string) ($_POST['template_name'] ?? '')) ?: pathinfo($file['name'], PATHINFO_FILENAME),
         'extension' => 'pdf',
         'size' => (int) $file['size'],
     ],
@@ -336,6 +386,7 @@ $blueprint = [
     ],
     'pages' => $pages,
 ];
+$blueprint['source']['template_name'] = mb_substr($blueprint['source']['template_name'], 0, 255);
 
 $blueprintFile = $blueprintDir . $fileId . '.json';
 $encodedBlueprint = json_encode(

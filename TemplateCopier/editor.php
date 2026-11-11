@@ -29,6 +29,7 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
     && is_file(__DIR__ . '/uploads/' . $sourcePdfName)
         ? 'uploads/' . rawurlencode($sourcePdfName)
         : '';
+$isDashboardUpload = !empty($template['dashboard_upload']);
 ?>
 <!doctype html>
 <html lang="en">
@@ -39,9 +40,9 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
     <style>
         :root{color-scheme:light;--ink:#1c302b;--muted:#667873;--line:#d6e0dc;--paper:#fff;--surface:#f0f4f1;--green:#087f68;--green-dark:#075b4d;--coral:#de7155}
         *{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--surface);color:var(--ink);font:14px/1.45 system-ui,sans-serif}
-        button,input,select{font:inherit}button{cursor:pointer}.topbar{height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 22px;background:#fff;border-bottom:1px solid var(--line)}
+        button,input,select,textarea{font:inherit}button{cursor:pointer}.topbar{height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 22px;background:#fff;border-bottom:1px solid var(--line)}
         .brand{font:700 20px Georgia,serif}.file-title{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.actions{display:flex;gap:8px;align-items:center}.button{min-height:38px;padding:8px 12px;border:1px solid var(--line);background:#fff;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:7px}.button.primary{border-color:var(--green);background:var(--green);color:#fff}.button:hover{border-color:var(--green)}
-        .workspace{display:grid;grid-template-columns:minmax(0,1fr) 310px;min-height:calc(100vh - 64px)}.stage{min-width:0;display:flex;flex-direction:column;align-items:center;padding:24px;gap:16px}.stagebar{width:min(100%,980px);display:flex;justify-content:space-between;align-items:center;gap:12px}.stagebar select{max-width:260px}.stagebar select,.field input,.field select{width:100%;min-height:36px;padding:7px 9px;border:1px solid var(--line);background:#fff;color:var(--ink)}
+        .workspace{display:grid;grid-template-columns:minmax(0,1fr) 310px;min-height:calc(100vh - 64px)}.stage{min-width:0;display:flex;flex-direction:column;align-items:center;padding:24px;gap:16px}.stagebar{width:min(100%,980px);display:flex;justify-content:space-between;align-items:center;gap:12px}.stagebar select{max-width:260px}.stagebar select,.field input,.field select,.field textarea{width:100%;min-height:36px;padding:7px 9px;border:1px solid var(--line);background:#fff;color:var(--ink)}.field textarea{min-height:76px;resize:vertical;line-height:1.4}
         .canvas-wrap{width:min(100%,980px);height:calc(100vh - 158px);min-height:420px;overflow:auto;display:grid;place-items:center;padding:28px;background:#e2e9e5;border:1px solid var(--line)}#designCanvas{display:block;max-width:100%;max-height:100%;width:auto;height:auto;background:#fff;box-shadow:0 8px 30px #183a3022;touch-action:none}
         .panel{padding:22px;background:#fff;border-left:1px solid var(--line)}.panel h1{font:700 22px Georgia,serif;margin:0 0 5px}.panel .hint{margin:0 0 20px;color:var(--muted)}.field{display:grid;gap:5px;margin:0 0 13px}.field label{color:var(--muted);font-size:12px;font-weight:650}.field input[type=color]{padding:3px;height:38px}.field input:disabled,.field select:disabled{background:#f3f5f4;color:#899691}.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.element-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:18px 0;padding-top:16px;border-top:1px solid var(--line)}.status{min-height:24px;color:var(--green-dark);font-size:13px}.status.error{color:#b33f2d}.selected-label{min-height:20px;margin:14px 0;color:var(--coral);font-size:12px;font-weight:700}.download{display:block;margin-top:16px;color:var(--green-dark)}
         @media(max-width:850px){.workspace{grid-template-columns:1fr}.stage{padding:16px}.canvas-wrap{height:62vh;min-height:340px}.panel{border-left:0;border-top:1px solid var(--line)}.topbar{padding:0 14px}.brand{font-size:17px}.file-title{display:none}}
@@ -55,7 +56,7 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
         <div class="actions">
             <a class="button" href="index.php">New PDF</a>
             <a class="button" href="uploads/blueprints/<?= rawurlencode($templateId) ?>.json" download>Download JSON</a>
-            <button class="button primary" id="saveButton" type="button">Save changes</button>
+            <button class="button primary" id="saveButton" type="button"><?= $isDashboardUpload ? 'Save & use in Dashboard' : 'Save changes' ?></button>
         </div>
     </header>
     <main class="workspace">
@@ -69,9 +70,9 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
         </section>
         <aside class="panel">
             <h1>Design elements</h1>
-            <p class="hint">The original PDF artwork stays in the background, with its text hidden. Select an editable text element to replace or restyle it.</p>
+            <p class="hint">The original PDF artwork stays in the background, with its text hidden. Select an editable text element to replace or restyle it. Press Enter in the text box to start a new line.</p>
             <div class="selected-label" id="selectedLabel">No element selected</div>
-            <div class="field"><label for="textField">Text or image description</label><input id="textField" data-property="text" disabled></div>
+            <div class="field"><label for="textField">Text or image description</label><textarea id="textField" data-property="text" rows="3" disabled></textarea></div>
             <div class="field"><label for="roleField">Element role</label><input id="roleField" data-property="role" disabled></div>
             <div class="field-row">
                 <div class="field"><label for="xField">X position</label><input id="xField" data-property="x" type="number" step="1" disabled></div>
@@ -102,6 +103,7 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
         const template = <?= $safeTemplate ?>;
         const templateId = <?= json_encode($safeId, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
         const sourcePdfUrl = <?= json_encode($sourcePdfUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+        const dashboardUpload = <?= $isDashboardUpload ? 'true' : 'false' ?>;
         template.pages.forEach(page => {
             page.width = Number(page.width) || 612;
             page.height = Number(page.height) || 792;
@@ -215,7 +217,15 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
                         text.append(span);
                     });
                 } else {
-                    text.textContent = element.text || '';
+                    const lines = String(element.text || '').split(/\r?\n/);
+                    lines.forEach((line, index) => {
+                        const span = svgNode('tspan', {
+                            x: Number(element.x),
+                            dy: index === 0 ? 0 : Number(element.fontSize || 16) * 1.2,
+                        });
+                        span.textContent = line;
+                        text.append(span);
+                    });
                 }
                 group.append(text);
             } else if (element.type === 'ellipse') {
@@ -346,7 +356,7 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
                     };
                 });
             return {
-                image: pageCanvas.toDataURL('image/png'),
+                image: pageCanvas.toDataURL('image/jpeg', 0.88),
                 width: coordinateViewport.width,
                 height: coordinateViewport.height,
                 nativeItems,
@@ -572,7 +582,8 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
             saveStatus.textContent = 'Aligning PDF text…';
             try {
                 if (sourcePdfUrl) {
-                    for (let index = 0; index < template.pages.length; index++) {
+                    const pageCount = dashboardUpload ? Math.min(template.pages.length, 6) : template.pages.length;
+                    for (let index = 0; index < pageCount; index++) {
                         if (originalPageImages.has(index)) continue;
                         const pendingRequest = backgroundRequests.get(index);
                         if (pendingRequest) await pendingRequest;
@@ -589,6 +600,34 @@ $sourcePdfUrl = preg_match('/^template_[A-Za-z0-9.]+\.pdf$/', $sourcePdfName)
                 });
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.error || 'Save failed.');
+
+                if (dashboardUpload) {
+                    const pageCount = Math.min(template.pages.length, 6);
+                    for (let index = 0; index < pageCount; index++) {
+                        const pageData = originalPageImages.get(index);
+                        if (!pageData) throw new Error(`The cleaned background for page ${index + 1} is missing.`);
+                        saveStatus.textContent = `Saving cleaned page ${index + 1} of ${pageCount}…`;
+                        const pageResponse = await fetch('save-template-page.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: templateId, page: index, image: pageData.image }),
+                        });
+                        const pageResult = await pageResponse.json();
+                        if (!pageResponse.ok) throw new Error(pageResult.error || `Could not save page ${index + 1}.`);
+                    }
+
+                    saveStatus.textContent = 'Adding template to Dashboard…';
+                    const completionResponse = await fetch('../Dashboard/complete-template-upload.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: templateId }),
+                    });
+                    const completionResult = await completionResponse.json();
+                    if (!completionResponse.ok) throw new Error(completionResult.error || 'Could not add the template to the Dashboard.');
+                    window.location.href = `../Dashboard/index.php?template_id=${encodeURIComponent(completionResult.template_id)}`;
+                    return;
+                }
+
                 saveStatus.textContent = 'Saved';
             } catch (error) {
                 saveStatus.classList.add('error');

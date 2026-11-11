@@ -1,5 +1,6 @@
 <?php
 
+session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 function respond($status, array $body)
@@ -42,6 +43,22 @@ $path = __DIR__ . '/uploads/blueprints/' . $templateId . '.json';
 if (!is_file($path)) {
     respond(404, ['error' => 'Template not found.']);
 }
+
+$existingTemplate = json_decode((string) file_get_contents($path), true);
+if (!is_array($existingTemplate)) {
+    respond(422, ['error' => 'Template data is invalid.']);
+}
+if (
+    !empty($existingTemplate['dashboard_upload'])
+    && (!isset($_SESSION['user_id']) || (int) $_SESSION['user_id'] !== (int) ($existingTemplate['dashboard_owner_id'] ?? 0))
+) {
+    respond(403, ['error' => 'You are not allowed to edit this template.']);
+}
+
+$template['dashboard_upload'] = $existingTemplate['dashboard_upload'] ?? false;
+$template['dashboard_owner_id'] = $existingTemplate['dashboard_owner_id'] ?? null;
+$template['source'] = $existingTemplate['source'] ?? [];
+$template['analysis'] = $existingTemplate['analysis'] ?? [];
 
 $encoded = json_encode(
     $template,

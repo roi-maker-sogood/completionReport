@@ -314,13 +314,12 @@ table.edit-table textarea{min-height:44px;font-size:12.5px;}
   width:794px;height:1123px;background:var(--paper);position:relative;overflow:hidden;
   font-family:var(--font);color:var(--ink);flex:0 0 auto;
 }
-.template-page{background-position:center;background-repeat:no-repeat;background-size:cover;}
-.template-overlay{position:absolute;inset:0;padding:72px 64px;color:#17212b;background:rgba(255,255,255,.08);}
-.template-overlay h1{font-size:34px;margin:0 0 12px;color:#143b55;}
-.template-overlay h2{font-size:24px;margin:0 0 14px;color:#143b55;}
-.template-overlay h3{font-size:16px;margin:18px 0 6px;color:#143b55;}
-.template-overlay p{max-width:600px;font-size:14px;line-height:1.5;margin:8px 0;}
-.template-overlay .slot-image-grid{max-height:720px;overflow:hidden;}
+.template-page{background-position:center;background-repeat:no-repeat;background-size:100% 100%;}
+.template-elements{position:absolute;inset:0;display:block;overflow:hidden;}
+.template-preview-text{cursor:text;pointer-events:visiblePainted;}
+.template-text-card label{display:block;margin-bottom:8px;font-size:13px;font-weight:650;}
+.template-text-card textarea{display:block;width:100%;min-height:58px;}
+.template-field-link{float:right;color:var(--indigo);font-size:11px;font-weight:600;}
 .page-footer{
   position:absolute;left:0;right:0;bottom:0;height:26px;background:var(--footer-gray);
   display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:var(--footer-text);
@@ -432,6 +431,14 @@ table.doc-table a{color:var(--indigo);}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
 .modal-head h2{font-size:16px;}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+.template-tabs{display:flex;gap:8px;margin:16px 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line);}
+.template-tabs .active{border-color:var(--indigo);color:var(--indigo);background:#eee9ff;}
+.template-panel-description{margin:0 0 12px;line-height:1.45;}
+.uploaded-template-list{list-style:none;margin:0;padding:0;max-height:48vh;overflow-y:auto;}
+.uploaded-template-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);}
+.uploaded-template-name{min-width:0;overflow-wrap:anywhere;font-weight:600;}
+.uploaded-template-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.template-list-error{padding:10px 0;color:var(--danger);}
 
 .toast{
   position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
