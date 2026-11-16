@@ -96,6 +96,7 @@ PROMPT;
     $responseBody = false;
     $status = 0;
     $attemptedModels = [];
+    $timedOut = false;
     $models = [$model];
     if ($fallbackModel !== '' && $fallbackModel !== $model) {
         $models[] = $fallbackModel;
@@ -117,7 +118,7 @@ PROMPT;
             if ($remainingSeconds <= 1) {
                 break;
             }
-            $requestTimeout = min(90, (int) floor($remainingSeconds - 1));
+            $requestTimeout = max(1, min(90, (int) floor($remainingSeconds - 1)));
 
             $curl = curl_init($endpoint);
             curl_setopt_array($curl, [
@@ -134,12 +135,23 @@ PROMPT;
 
             $responseBody = curl_exec($curl);
             $curlError = curl_error($curl);
+            $curlErrorNumber = curl_errno($curl);
             $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
             curl_close($curl);
 
             if ($responseBody === false) {
+                if ($curlErrorNumber === CURLE_OPERATION_TIMEDOUT) {
+                    $timedOut = true;
+                    error_log(sprintf(
+                        'Gemini vision analysis timed out for model %s after %d seconds.',
+                        $candidateModel,
+                        $requestTimeout
+                    ));
+                    break;
+                }
                 throw new RuntimeException('Could not reach the vision API: ' . $curlError);
             }
+            $timedOut = false;
 
             if ($status >= 200 && $status < 300) {
                 break;
@@ -159,9 +171,23 @@ PROMPT;
         if ($status >= 200 && $status < 300) {
             break;
         }
+        if ($timedOut && $modelIndex < count($models) - 1) {
+            continue;
+        }
         if (!in_array($status, $retryableStatuses, true) || $modelIndex === count($models) - 1) {
             break;
         }
+    }
+
+    if ($responseBody === false && $timedOut) {
+        if (microtime(true) >= $deadline) {
+            throw new RuntimeException('Template analysis reached its 270-second time limit. Try a smaller PDF or retry when Gemini is less busy.');
+        }
+        throw new RuntimeException(
+            'The vision API timed out while analyzing the PDF'
+            . (count($attemptedModels) > 1 ? ' with models ' . implode(' and ', $attemptedModels) : '')
+            . '. Try a smaller PDF or retry later.'
+        );
     }
 
     $response = json_decode($responseBody, true);
